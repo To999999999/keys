@@ -30,6 +30,7 @@ BASH_RC_FILE="${BASH_RC_FILE:-$HOME/.bashrc}"
 # Lines to persist in shell startup
 SSH_AUTH_SOCK_LINE='export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"'
 GPG_TTY_LINE='export GPG_TTY="$(tty)"'
+GPG_UPDATE_TTY_LINE='gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1'
 
 # -----------------------------
 # Helpers
@@ -56,8 +57,13 @@ ask_yes_no() {
   local prompt="$1"
   local answer
 
-  printf '\n%s [y/N]: ' "$prompt"
-  read -r answer
+  # Read directly from the user's terminal.
+  # This is required because the script is typically executed via:
+  #   curl ... | bash
+  # where stdin is already consumed by the script itself.
+  printf '
+%s [y/N]: ' "$prompt" > /dev/tty
+  read -r answer < /dev/tty
 
   case "$answer" in
     y|Y|yes|YES)
@@ -270,8 +276,12 @@ restart_gpg_agent
 
 append_if_missing_exact_line "$SSH_AUTH_SOCK_LINE" "$ZSH_RC_FILE"
 append_if_missing_exact_line "$SSH_AUTH_SOCK_LINE" "$BASH_RC_FILE"
+
 append_if_missing_exact_line "$GPG_TTY_LINE" "$ZSH_RC_FILE"
 append_if_missing_exact_line "$GPG_TTY_LINE" "$BASH_RC_FILE"
+
+append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$ZSH_RC_FILE"
+append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$BASH_RC_FILE"
 
 # -----------------------------
 # Mode selection:
@@ -407,17 +417,12 @@ Git identity configured as:
   ${GIT_USER_NAME}
   ${GIT_USER_EMAIL}
 
-Test your GitHub SSH connection with:
-
-  ssh -T git@github.com
-
-Expected successful output:
-
-  Hi <username>! You've successfully authenticated...
-
 Reload your shell config with one of:
-
   source "${ZSH_RC_FILE}"
   source "${BASH_RC_FILE}"
+  
+Test your GitHub SSH connection with either:
+  ssh -T git@github.com 
+  ssh -T github.com
 
 EOF
