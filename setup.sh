@@ -8,9 +8,13 @@ set -euo pipefail
 # Public key URL used in YubiKey mode
 PUBLIC_KEY_URL="${PUBLIC_KEY_URL:-https://raw.githubusercontent.com/To999999999/keys/main/public.asc}"
 
-# SSH target
+# GitHub SSH target
 SSH_HOST="${SSH_HOST:-github.com}"
 SSH_USER="${SSH_USER:-git}"
+
+# Git config values
+GIT_USER_NAME="${GIT_USER_NAME:-Adrien}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-96784564+To999999999@users.noreply.github.com}"
 
 # Backup archive expected next to this script
 BACKUP_ARCHIVE_NAME="${BACKUP_ARCHIVE_NAME:-gpg-backup.tar.gz.gpg}"
@@ -48,6 +52,23 @@ err() {
   exit 1
 }
 
+ask_yes_no() {
+  local prompt="$1"
+  local answer
+
+  printf '\n%s [y/N]: ' "$prompt"
+  read -r answer
+
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 append_if_missing_exact_line() {
   local line="$1"
   local file="$2"
@@ -63,9 +84,7 @@ append_if_missing_exact_line() {
 }
 
 choose_ssh_config_file() {
-  if [ -d "$HOME/.config/ssh" ] || [ -f "$HOME/.config/ssh/config" ]; then
-    printf '%s\n' "$HOME/.config/ssh/config"
-  elif [ -d "$HOME/.ssh" ] || [ -f "$HOME/.ssh/config" ]; then
+  if [ -d "$HOME/.ssh" ] || [ -f "$HOME/.ssh/config" ]; then
     printf '%s\n' "$HOME/.ssh/config"
   else
     printf '%s\n' "$HOME/.ssh/config"
@@ -93,11 +112,55 @@ EOF
   touch "$file"
   chmod 600 "$file"
 
-  if grep -Eq "^[[:space:]]*Host[[:space:]]+${host}([[:space:]]|\$)" "$file"; then
-    msg "SSH config already has a block for ${host}; not modifying"
+  if grep -Eq "^[[:space:]]*Host[[:space:]]+${host}([[:space:]]|$)" "$file"; then
+    msg "SSH config already contains a block for ${host}"
   else
-    msg "Appending SSH config block to $file"
-    printf '%s\n' "$block" >> "$file"
+    if ask_yes_no "Add an SSH config block for GitHub using your GPG agent?"; then
+      msg "Appending SSH config block to $file"
+      printf '%s\n' "$block" >> "$file"
+    else
+      warn "Skipped SSH config modification"
+    fi
+  fi
+}
+
+ensure_gitconfig() {
+  local gitconfig_file="$HOME/.gitconfig"
+
+  local existing_name=""
+  local existing_email=""
+
+  if [ -f "$gitconfig_file" ]; then
+    existing_name="$(git config --global user.name 2>/dev/null || true)"
+    existing_email="$(git config --global user.email 2>/dev/null || true)"
+  fi
+
+  if [[ "$existing_name" == "$GIT_USER_NAME" ]] && [[ "$existing_email" == "$GIT_USER_EMAIL" ]]; then
+    msg ".gitconfig already configured correctly"
+    return
+  fi
+
+  printf '\nCurrent git identity:\n'
+  printf '  name:  %s\n' "${existing_name:-<unset>}"
+  printf '  email: %s\n' "${existing_email:-<unset>}"
+
+  printf '\nDesired git identity:\n'
+  printf '  name:  %s\n' "$GIT_USER_NAME"
+  printf '  email: %s\n' "$GIT_USER_EMAIL"
+
+  if ask_yes_no "Update your global Git identity for GitHub commits?"; then
+
+    if [ -f "$gitconfig_file" ]; then
+      cp "$gitconfig_file" "$gitconfig_file.bak"
+      msg "Backup created: $gitconfig_file.bak"
+    fi
+
+    git config --global user.name "$GIT_USER_NAME"
+    git config --global user.email "$GIT_USER_EMAIL"
+
+    msg "Updated global Git identity"
+  else
+    warn "Skipped Git identity update"
   fi
 }
 
@@ -165,6 +228,7 @@ have gpg-connect-agent || err "gpg-connect-agent is not installed"
 have ssh-add || err "ssh-add is not installed"
 have tar || err "tar is not installed"
 have awk || err "awk is not installed"
+have git || err "git is not installed"
 
 if ! have curl && ! have wget; then
   err "Need curl or wget"
@@ -271,7 +335,6 @@ fi
 
 # -----------------------------
 # Check SSH identities exposed by agent
-# If none, try adding the [A] subkey keygrip to sshcontrol
 # -----------------------------
 
 msg "Keys currently exposed to SSH"
@@ -307,6 +370,12 @@ elif grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
 fi
 
 # -----------------------------
+# Git configuration
+# -----------------------------
+
+ensure_gitconfig
+
+# -----------------------------
 # Add SSH config block
 # -----------------------------
 
@@ -334,10 +403,20 @@ Shell startup files checked:
 SSH config file checked:
   ${SSH_CONFIG_FILE}
 
-Try:
-  ssh -T ${SSH_USER}@${SSH_HOST}
+Git identity configured as:
+  ${GIT_USER_NAME}
+  ${GIT_USER_EMAIL}
+
+Test your GitHub SSH connection with:
+
+  ssh -T git@github.com
+
+Expected successful output:
+
+  Hi <username>! You've successfully authenticated...
 
 Reload your shell config with one of:
+
   source "${ZSH_RC_FILE}"
   source "${BASH_RC_FILE}"
 
