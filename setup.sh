@@ -223,7 +223,11 @@ fi
 # Paths
 # -----------------------------
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SCRIPT_DIR="$(pwd)"
+fi
 BACKUP_ARCHIVE_PATH="${SCRIPT_DIR}/${BACKUP_ARCHIVE_NAME}"
 
 GNUPGHOME_DIR="$(gpgconf --list-dirs homedir)"
