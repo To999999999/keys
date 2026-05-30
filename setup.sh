@@ -45,6 +45,14 @@ err() {
   exit 1
 }
 
+update_gpg_tty_if_available() {
+  if tty -s; then
+    export GPG_TTY
+    GPG_TTY="$(tty)"
+    gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
+  fi
+}
+
 smartcard_err() {
   warn "YubiKey/card not detected by GPG."
   warn "If this is a fresh Debian/Ubuntu system, you may need:"
@@ -171,9 +179,7 @@ restart_gpg_agent() {
   SSH_SOCKET="$(gpgconf --list-dirs agent-ssh-socket)"
   export SSH_AUTH_SOCK="$SSH_SOCKET"
 
-  export GPG_TTY
-  GPG_TTY="$(tty)"
-  gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
+  update_gpg_tty_if_available
 
   if [ ! -S "$SSH_AUTH_SOCK" ]; then
     err "SSH agent socket was not created: $SSH_AUTH_SOCK"
@@ -356,14 +362,15 @@ else
   gpg --card-status || smartcard_err
 fi
 
-# Important:
 # Importing secret keys or creating smartcard stubs can change what gpg-agent sees.
-# Restart here so both encrypted-backup mode and YubiKey mode work immediately.
+# Restart here so both backup mode and YubiKey mode work immediately.
 restart_gpg_agent
 
 # -----------------------------
 # Check SSH identities exposed by agent
 # -----------------------------
+
+update_gpg_tty_if_available
 
 msg "Keys currently exposed to SSH"
 SSH_ADD_OUTPUT="$(ssh-add -L 2>&1 || true)"
@@ -410,8 +417,7 @@ ensure_gitconfig
 SSH_CONFIG_FILE="$(choose_ssh_config_file)"
 ensure_ssh_config_block "$SSH_CONFIG_FILE" "$SSH_HOST" "$SSH_USER" "$SSH_SOCKET"
 
-# Final agent refresh after sshconfig/gitconfig work.
-# This mainly refreshes TTY/pinentry state for the current shell used by the script.
+# Refresh agent one last time after config changes.
 restart_gpg_agent
 
 # -----------------------------
