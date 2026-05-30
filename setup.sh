@@ -26,6 +26,8 @@ SSH_AUTH_SOCK_LINE='export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket
 GPG_TTY_LINE='export GPG_TTY="$(tty)"'
 GPG_UPDATE_TTY_LINE='gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1'
 
+SSH_SOCKET=""
+
 have() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -56,8 +58,7 @@ ask_yes_no() {
   local prompt="$1"
   local answer
 
-  printf '
-%s [y/N]: ' "$prompt" > /dev/tty
+  printf '\n%s [y/N]: ' "$prompt" > /dev/tty
   read -r answer < /dev/tty
 
   case "$answer" in
@@ -163,13 +164,15 @@ cleanup_dir() {
 
 restart_gpg_agent() {
   msg "Restarting gpg-agent"
+
   gpgconf --kill gpg-agent || true
   gpgconf --launch gpg-agent
-  gpg-connect-agent /bye >/dev/null
 
   SSH_SOCKET="$(gpgconf --list-dirs agent-ssh-socket)"
   export SSH_AUTH_SOCK="$SSH_SOCKET"
-  export GPG_TTY="$(tty)"
+
+  export GPG_TTY
+  GPG_TTY="$(tty)"
   gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
   if [ ! -S "$SSH_AUTH_SOCK" ]; then
@@ -227,7 +230,11 @@ for cmd in \
   chmod \
   mkdir \
   mktemp \
-  rm
+  rm \
+  cp \
+  touch \
+  dirname \
+  tty
 do
   have "$cmd" || err "$cmd is not installed"
 done
@@ -349,12 +356,14 @@ else
   gpg --card-status || smartcard_err
 fi
 
+# Important:
+# Importing secret keys or creating smartcard stubs can change what gpg-agent sees.
+# Restart here so both encrypted-backup mode and YubiKey mode work immediately.
+restart_gpg_agent
+
 # -----------------------------
 # Check SSH identities exposed by agent
 # -----------------------------
-
-export GPG_TTY="$(tty)"
-gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
 msg "Keys currently exposed to SSH"
 SSH_ADD_OUTPUT="$(ssh-add -L 2>&1 || true)"
@@ -401,6 +410,10 @@ ensure_gitconfig
 SSH_CONFIG_FILE="$(choose_ssh_config_file)"
 ensure_ssh_config_block "$SSH_CONFIG_FILE" "$SSH_HOST" "$SSH_USER" "$SSH_SOCKET"
 
+# Final agent refresh after sshconfig/gitconfig work.
+# This mainly refreshes TTY/pinentry state for the current shell used by the script.
+restart_gpg_agent
+
 # -----------------------------
 # Final instructions
 # -----------------------------
@@ -415,7 +428,7 @@ Mode used:
 Secret material imported:
   ${IMPORTED_SECRET_FILE:-none}
 
-For this shell session, SSH is configured to use:
+For this script process, SSH was configured to use:
   SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
 
 Shell startup files checked:
@@ -429,12 +442,20 @@ Git identity configured as:
   ${GIT_USER_NAME}
   ${GIT_USER_EMAIL}
 
-Reload your shell config with one of:
+Important:
+  If you ran this with "curl ... | bash", exported variables do not survive
+  into your current shell.
+
+For this current terminal session, run:
+  export SSH_AUTH_SOCK="\$(gpgconf --list-dirs agent-ssh-socket)"
+  export GPG_TTY="\$(tty)"
+  gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1
+
+Or reload your shell config:
   source "${ZSH_RC_FILE}"
   source "${BASH_RC_FILE}"
 
-Test your GitHub SSH connection with either:
+Test your GitHub SSH connection with:
   ssh -T git@github.com
-  ssh -T github.com
 
 EOF
