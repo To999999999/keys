@@ -15,8 +15,6 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-96784564+To999999999@users.noreply.github.com}
 
 BACKUP_ARCHIVE_NAME="${BACKUP_ARCHIVE_NAME:-gpg-backup.tar.gz.gpg}"
 
-# Files expected inside the decrypted archive.
-# If both exist, SECRET_KEYS_FILE wins.
 SECRET_KEYS_FILE="${SECRET_KEYS_FILE:-secret-keys-backup.asc}"
 SECRET_SUBKEYS_FILE="${SECRET_SUBKEYS_FILE:-secret-subkeys-backup.asc}"
 OWNERTRUST_FILE="${OWNERTRUST_FILE:-ownertrust.txt}"
@@ -42,6 +40,15 @@ warn() {
 
 err() {
   printf '\nERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+smartcard_err() {
+  warn "YubiKey/card not detected by GPG."
+  warn "If this is a fresh Debian/Ubuntu system, you may need:"
+  warn "  sudo apt install -y pcscd scdaemon pcsc-tools"
+  warn "  sudo systemctl enable --now pcscd"
+  warn "Also make sure the YubiKey is plugged in and passed through to the VM if applicable."
   exit 1
 }
 
@@ -112,7 +119,6 @@ EOF
 
 ensure_gitconfig() {
   local gitconfig_file="$HOME/.gitconfig"
-
   local existing_name=""
   local existing_email=""
 
@@ -142,7 +148,6 @@ ensure_gitconfig() {
 
     git config --global user.name "$GIT_USER_NAME"
     git config --global user.email "$GIT_USER_EMAIL"
-
     msg "Updated global Git identity"
   else
     warn "Skipped Git identity update"
@@ -164,6 +169,8 @@ restart_gpg_agent() {
 
   SSH_SOCKET="$(gpgconf --list-dirs agent-ssh-socket)"
   export SSH_AUTH_SOCK="$SSH_SOCKET"
+  export GPG_TTY="$(tty)"
+  gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
   if [ ! -S "$SSH_AUTH_SOCK" ]; then
     err "SSH agent socket was not created: $SSH_AUTH_SOCK"
@@ -207,13 +214,23 @@ ensure_sshcontrol_contains_auth_keygrip() {
 # Dependency checks
 # -----------------------------
 
-have gpg || err "gpg is not installed"
-have gpgconf || err "gpgconf is not installed"
-have gpg-connect-agent || err "gpg-connect-agent is not installed"
-have ssh-add || err "ssh-add is not installed"
-have tar || err "tar is not installed"
-have awk || err "awk is not installed"
-have git || err "git is not installed"
+for cmd in \
+  gpg \
+  gpgconf \
+  gpg-connect-agent \
+  ssh \
+  ssh-add \
+  tar \
+  awk \
+  grep \
+  git \
+  chmod \
+  mkdir \
+  mktemp \
+  rm
+do
+  have "$cmd" || err "$cmd is not installed"
+done
 
 if ! have curl && ! have wget; then
   err "Need curl or wget"
@@ -228,6 +245,7 @@ if [ -n "${BASH_SOURCE[0]:-}" ]; then
 else
   SCRIPT_DIR="$(pwd)"
 fi
+
 BACKUP_ARCHIVE_PATH="${SCRIPT_DIR}/${BACKUP_ARCHIVE_NAME}"
 
 GNUPGHOME_DIR="$(gpgconf --list-dirs homedir)"
@@ -267,9 +285,7 @@ append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$ZSH_RC_FILE"
 append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$BASH_RC_FILE"
 
 # -----------------------------
-# Mode selection:
-#   1) local encrypted backup archive
-#   2) YubiKey + public key import
+# Mode selection
 # -----------------------------
 
 TEMP_DIR=""
@@ -330,12 +346,15 @@ else
   fi
 
   msg "Checking YubiKey / smartcard status"
-  gpg --card-status || err "YubiKey/card not detected by GPG"
+  gpg --card-status || smartcard_err
 fi
 
 # -----------------------------
 # Check SSH identities exposed by agent
 # -----------------------------
+
+export GPG_TTY="$(tty)"
+gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
 msg "Keys currently exposed to SSH"
 SSH_ADD_OUTPUT="$(ssh-add -L 2>&1 || true)"
