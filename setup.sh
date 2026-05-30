@@ -264,7 +264,13 @@ else
   fi
 
   msg "Checking YubiKey / smartcard status"
-  gpg --card-status || msg "YubiKey/card not detected by GPG."; msg "If this is a fresh Debian system, you may need:" msg "sudo apt install -y pcscd scdaemon pcsc-tools" msg "sudo systemctl enable --now pcscd"; err ""
+  if ! gpg --card-status; then
+    msg "YubiKey/card not detected by GPG."
+    msg "If this is a fresh Debian system, you may need:"
+    msg "  sudo apt install -y pcscd scdaemon pcsc-tools"
+    msg "  sudo systemctl enable --now pcscd"
+    err "Cannot continue without a detected YubiKey/card."
+  fi
 fi
 
 # Importing secret keys or creating smartcard stubs can change what gpg-agent sees.
