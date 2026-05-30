@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# -----------------------------
+# Config
+# -----------------------------
+
 PUBLIC_KEY_URL="${PUBLIC_KEY_URL:-https://raw.githubusercontent.com/To999999999/keys/main/public.asc}"
 
 SSH_HOST="${SSH_HOST:-github.com}"
@@ -22,28 +26,38 @@ SSH_AUTH_SOCK_LINE='export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket
 GPG_TTY_LINE='export GPG_TTY="$(tty)"'
 GPG_UPDATE_TTY_LINE='gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1'
 
-have() { command -v "$1" >/dev/null 2>&1; }
-msg() { printf '\n==> %s\n' "$*"; }
-warn() { printf '\nWARNING: %s\n' "$*" >&2; }
-err() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
 
-fetch_url() {
-  local url="$1"
+msg() {
+  printf '\n==> %s\n' "$*"
+}
 
-  if have curl; then
-    curl -fsSL "$url"
-  elif have wget; then
-    wget -qO- "$url"
-  else
-    err "Need curl or wget"
-  fi
+warn() {
+  printf '\nWARNING: %s\n' "$*" >&2
+}
+
+err() {
+  printf '\nERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+smartcard_err() {
+  warn "YubiKey/card not detected by GPG."
+  warn "If this is a fresh Debian/Ubuntu system, you may need:"
+  warn "  sudo apt install -y pcscd scdaemon pcsc-tools"
+  warn "  sudo systemctl enable --now pcscd"
+  warn "Also make sure the YubiKey is plugged in and passed through to the VM if applicable."
+  exit 1
 }
 
 ask_yes_no() {
   local prompt="$1"
-  local answer=""
+  local answer
 
-  printf '\n%s [y/N]: ' "$prompt" > /dev/tty
+  printf '
+%s [y/N]: ' "$prompt" > /dev/tty
   read -r answer < /dev/tty
 
   case "$answer" in
@@ -66,18 +80,96 @@ append_if_missing_exact_line() {
   fi
 }
 
+choose_ssh_config_file() {
+  printf '%s\n' "$HOME/.ssh/config"
+}
+
+ensure_ssh_config_block() {
+  local file="$1"
+  local host="$2"
+  local user="$3"
+  local socket="$4"
+
+  local block
+  block=$(cat <<EOF
+
+# ${host} via GPG agent
+Host ${host}
+  User ${user}
+  IdentityAgent ${socket}
+EOF
+)
+
+  mkdir -p "$(dirname "$file")"
+  chmod 700 "$(dirname "$file")"
+  touch "$file"
+  chmod 600 "$file"
+
+  if grep -Eq "^[[:space:]]*Host[[:space:]]+${host}([[:space:]]|$)" "$file"; then
+    msg "SSH config already contains a block for ${host}"
+  else
+    if ask_yes_no "Add an SSH config block for GitHub using your GPG agent?"; then
+      msg "Appending SSH config block to $file"
+      printf '%s\n' "$block" >> "$file"
+    else
+      warn "Skipped SSH config modification"
+    fi
+  fi
+}
+
+ensure_gitconfig() {
+  local gitconfig_file="$HOME/.gitconfig"
+  local existing_name=""
+  local existing_email=""
+
+  if [ -f "$gitconfig_file" ]; then
+    existing_name="$(git config --global user.name 2>/dev/null || true)"
+    existing_email="$(git config --global user.email 2>/dev/null || true)"
+  fi
+
+  if [[ "$existing_name" == "$GIT_USER_NAME" ]] && [[ "$existing_email" == "$GIT_USER_EMAIL" ]]; then
+    msg ".gitconfig already configured correctly"
+    return
+  fi
+
+  printf '\nCurrent git identity:\n'
+  printf '  name:  %s\n' "${existing_name:-<unset>}"
+  printf '  email: %s\n' "${existing_email:-<unset>}"
+
+  printf '\nDesired git identity:\n'
+  printf '  name:  %s\n' "$GIT_USER_NAME"
+  printf '  email: %s\n' "$GIT_USER_EMAIL"
+
+  if ask_yes_no "Update your global Git identity for GitHub commits?"; then
+    if [ -f "$gitconfig_file" ]; then
+      cp "$gitconfig_file" "$gitconfig_file.bak"
+      msg "Backup created: $gitconfig_file.bak"
+    fi
+
+    git config --global user.name "$GIT_USER_NAME"
+    git config --global user.email "$GIT_USER_EMAIL"
+    msg "Updated global Git identity"
+  else
+    warn "Skipped Git identity update"
+  fi
+}
+
+cleanup_dir() {
+  local dir="$1"
+  if [ -n "${dir:-}" ] && [ -d "$dir" ]; then
+    rm -rf "$dir"
+  fi
+}
+
 restart_gpg_agent() {
   msg "Restarting gpg-agent"
-
   gpgconf --kill gpg-agent || true
   gpgconf --launch gpg-agent
+  gpg-connect-agent /bye >/dev/null
 
-  export SSH_AUTH_SOCK
-  SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"
-
-  export GPG_TTY
-  GPG_TTY="$(tty)"
-
+  SSH_SOCKET="$(gpgconf --list-dirs agent-ssh-socket)"
+  export SSH_AUTH_SOCK="$SSH_SOCKET"
+  export GPG_TTY="$(tty)"
   gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
   if [ ! -S "$SSH_AUTH_SOCK" ]; then
@@ -118,93 +210,6 @@ ensure_sshcontrol_contains_auth_keygrip() {
   fi
 }
 
-ensure_gitconfig() {
-  local gitconfig_file="$HOME/.gitconfig"
-  local existing_name=""
-  local existing_email=""
-
-  existing_name="$(git config --global user.name 2>/dev/null || true)"
-  existing_email="$(git config --global user.email 2>/dev/null || true)"
-
-  if [[ "$existing_name" == "$GIT_USER_NAME" ]] && [[ "$existing_email" == "$GIT_USER_EMAIL" ]]; then
-    msg ".gitconfig already configured correctly"
-    return
-  fi
-
-  printf '\nCurrent git identity:\n'
-  printf '  name:  %s\n' "${existing_name:-<unset>}"
-  printf '  email: %s\n' "${existing_email:-<unset>}"
-
-  printf '\nDesired git identity:\n'
-  printf '  name:  %s\n' "$GIT_USER_NAME"
-  printf '  email: %s\n' "$GIT_USER_EMAIL"
-
-  if ask_yes_no "Update your global Git identity for GitHub commits?"; then
-    if [ -f "$gitconfig_file" ]; then
-      cp "$gitconfig_file" "$gitconfig_file.bak"
-      msg "Backup created: $gitconfig_file.bak"
-    fi
-
-    git config --global user.name "$GIT_USER_NAME"
-    git config --global user.email "$GIT_USER_EMAIL"
-
-    msg "Updated global Git identity"
-  else
-    warn "Skipped Git identity update"
-  fi
-}
-
-ensure_ssh_config_block() {
-  local file="$1"
-  local host="$2"
-  local user="$3"
-  local socket="$4"
-
-  local block
-  block=$(cat <<EOF
-
-# ${host} via GPG agent
-Host ${host}
-  User ${user}
-  IdentityAgent ${socket}
-EOF
-)
-
-  mkdir -p "$(dirname "$file")"
-  chmod 700 "$(dirname "$file")"
-  touch "$file"
-  chmod 600 "$file"
-
-  if grep -Eq "^[[:space:]]*Host[[:space:]]+${host}([[:space:]]|$)" "$file"; then
-    msg "SSH config already contains a block for ${host}"
-    return
-  fi
-
-  if ask_yes_no "Add an SSH config block for GitHub using your GPG agent?"; then
-    msg "Appending SSH config block to $file"
-    printf '%s\n' "$block" >> "$file"
-  else
-    warn "Skipped SSH config modification"
-  fi
-}
-
-smartcard_error() {
-  warn "YubiKey/card not detected by GPG."
-  warn "On Debian/Ubuntu, you may need:"
-  warn "  sudo apt install -y pcscd scdaemon pcsc-tools"
-  warn "  sudo systemctl enable --now pcscd"
-  warn "If using a VM, also check USB passthrough."
-  exit 1
-}
-
-cleanup_dir() {
-  local dir="$1"
-
-  if [ -n "${dir:-}" ] && [ -d "$dir" ]; then
-    rm -rf "$dir"
-  fi
-}
-
 # -----------------------------
 # Dependency checks
 # -----------------------------
@@ -222,11 +227,7 @@ for cmd in \
   chmod \
   mkdir \
   mktemp \
-  rm \
-  cp \
-  touch \
-  dirname \
-  tty
+  rm
 do
   have "$cmd" || err "$cmd is not installed"
 done
@@ -254,7 +255,7 @@ chmod 700 "$GNUPGHOME_DIR"
 msg "Using GNUPGHOME: $GNUPGHOME_DIR"
 
 # -----------------------------
-# gpg-agent config
+# Enable ssh support in gpg-agent
 # -----------------------------
 
 GPG_AGENT_CONF="$GNUPGHOME_DIR/gpg-agent.conf"
@@ -262,10 +263,10 @@ touch "$GPG_AGENT_CONF"
 chmod 600 "$GPG_AGENT_CONF"
 
 if ! grep -Fxq 'enable-ssh-support' "$GPG_AGENT_CONF" 2>/dev/null; then
-  msg "Enabling SSH support in gpg-agent"
+  msg "Enabling ssh support in gpg-agent"
   printf '\nenable-ssh-support\n' >> "$GPG_AGENT_CONF"
 else
-  msg "gpg-agent SSH support already enabled"
+  msg "gpg-agent ssh support already enabled"
 fi
 
 restart_gpg_agent
@@ -289,13 +290,13 @@ append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$BASH_RC_FILE"
 
 TEMP_DIR=""
 USED_MODE=""
-IMPORTED_SECRET_FILE="none"
+IMPORTED_SECRET_FILE=""
 trap 'cleanup_dir "$TEMP_DIR"' EXIT
 
 if [ -f "$BACKUP_ARCHIVE_PATH" ]; then
   USED_MODE="encrypted local backup import"
 
-  msg "Found encrypted backup archive: $BACKUP_ARCHIVE_PATH"
+  msg "Found encrypted backup archive next to script"
 
   TEMP_DIR="$(mktemp -d)"
   DECRYPTED_TAR="${TEMP_DIR}/gpg-backup.tar.gz"
@@ -333,21 +334,26 @@ else
   msg "No local encrypted backup archive found"
   msg "Falling back to YubiKey mode"
 
-  [ -n "$PUBLIC_KEY_URL" ] || err "PUBLIC_KEY_URL is empty"
-
-  msg "Importing public key from URL"
-  fetch_url "$PUBLIC_KEY_URL" | gpg --import
+  if [ -n "$PUBLIC_KEY_URL" ]; then
+    msg "Importing public key from URL"
+    if have curl; then
+      curl -fsSL "$PUBLIC_KEY_URL" | gpg --import
+    else
+      wget -qO- "$PUBLIC_KEY_URL" | gpg --import
+    fi
+  else
+    err "PUBLIC_KEY_URL is empty"
+  fi
 
   msg "Checking YubiKey / smartcard status"
-  gpg --card-status || smartcard_error
+  gpg --card-status || smartcard_err
 fi
 
 # -----------------------------
-# SSH identity exposure
+# Check SSH identities exposed by agent
 # -----------------------------
 
-export GPG_TTY
-GPG_TTY="$(tty)"
+export GPG_TTY="$(tty)"
 gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
 
 msg "Keys currently exposed to SSH"
@@ -356,15 +362,15 @@ printf '%s\n' "$SSH_ADD_OUTPUT"
 
 if grep -Fq "Error connecting to agent" <<<"$SSH_ADD_OUTPUT"; then
   err "ssh-add could not talk to the SSH agent"
-fi
-
-if grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
-  warn "The SSH agent is running, but exposes no identities."
+elif grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
+  warn "The SSH agent is running, but it currently exposes no identities."
   warn "Trying to expose the [A] authentication subkey through sshcontrol."
 
   AUTH_KEYGRIP="$(get_auth_subkey_keygrip || true)"
 
-  [ -n "${AUTH_KEYGRIP:-}" ] || err "Could not find an [A] authentication subkey keygrip"
+  if [ -z "${AUTH_KEYGRIP:-}" ]; then
+    err "Could not find an [A] authentication subkey keygrip in your GPG secret keys."
+  fi
 
   SSHCONTROL_FILE="${GNUPGHOME_DIR}/sshcontrol"
   ensure_sshcontrol_contains_auth_keygrip "$SSHCONTROL_FILE" "$AUTH_KEYGRIP"
@@ -377,24 +383,26 @@ if grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
 
   if grep -Fq "Error connecting to agent" <<<"$SSH_ADD_OUTPUT"; then
     err "ssh-add could not talk to the SSH agent after sshcontrol update"
-  fi
-
-  if grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
-    err "The SSH agent still exposes no identities after updating sshcontrol"
+  elif grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
+    err "The SSH agent still exposes no identities after updating sshcontrol."
   fi
 fi
 
 # -----------------------------
-# Git + SSH config
+# Git configuration
 # -----------------------------
 
 ensure_gitconfig
 
-SSH_CONFIG_FILE="$HOME/.ssh/config"
-ensure_ssh_config_block "$SSH_CONFIG_FILE" "$SSH_HOST" "$SSH_USER" "$SSH_AUTH_SOCK"
+# -----------------------------
+# Add SSH config block
+# -----------------------------
+
+SSH_CONFIG_FILE="$(choose_ssh_config_file)"
+ensure_ssh_config_block "$SSH_CONFIG_FILE" "$SSH_HOST" "$SSH_USER" "$SSH_SOCKET"
 
 # -----------------------------
-# Final output
+# Final instructions
 # -----------------------------
 
 cat <<EOF
@@ -405,11 +413,10 @@ Mode used:
   ${USED_MODE}
 
 Secret material imported:
-  ${IMPORTED_SECRET_FILE}
+  ${IMPORTED_SECRET_FILE:-none}
 
-For this shell session:
+For this shell session, SSH is configured to use:
   SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
-  GPG_TTY=${GPG_TTY}
 
 Shell startup files checked:
   ${ZSH_RC_FILE}
@@ -422,7 +429,12 @@ Git identity configured as:
   ${GIT_USER_NAME}
   ${GIT_USER_EMAIL}
 
-Test your GitHub SSH connection with:
+Reload your shell config with one of:
+  source "${ZSH_RC_FILE}"
+  source "${BASH_RC_FILE}"
+
+Test your GitHub SSH connection with either:
   ssh -T git@github.com
+  ssh -T github.com
 
 EOF
