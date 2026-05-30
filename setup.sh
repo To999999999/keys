@@ -76,8 +76,6 @@ restart_gpg_agent() {
   if [ ! -S "$SSH_AUTH_SOCK" ]; then
     err "SSH agent socket was not created: $SSH_AUTH_SOCK"
   fi
-
-  msg "SSH_AUTH_SOCK set to: $SSH_AUTH_SOCK"
 }
 
 get_auth_subkey_keygrip() {
