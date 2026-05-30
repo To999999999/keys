@@ -5,36 +5,28 @@ set -euo pipefail
 # Config
 # -----------------------------
 
-# Public key URL used in YubiKey mode
 PUBLIC_KEY_URL="${PUBLIC_KEY_URL:-https://raw.githubusercontent.com/To999999999/keys/main/public.asc}"
 
-# GitHub SSH target
 SSH_HOST="${SSH_HOST:-github.com}"
 SSH_USER="${SSH_USER:-git}"
 
-# Git config values
 GIT_USER_NAME="${GIT_USER_NAME:-Adrien}"
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-96784564+To999999999@users.noreply.github.com}"
 
-# Backup archive expected next to this script
 BACKUP_ARCHIVE_NAME="${BACKUP_ARCHIVE_NAME:-gpg-backup.tar.gz.gpg}"
 
-# Files expected inside the decrypted archive
-SECRET_KEYS_FILE="${SECRET_KEYS_FILE:-private-keys-backup.asc}"
+# Files expected inside the decrypted archive.
+# If both exist, SECRET_KEYS_FILE wins.
+SECRET_KEYS_FILE="${SECRET_KEYS_FILE:-secret-keys-backup.asc}"
+SECRET_SUBKEYS_FILE="${SECRET_SUBKEYS_FILE:-secret-subkeys-backup.asc}"
 OWNERTRUST_FILE="${OWNERTRUST_FILE:-ownertrust.txt}"
 
-# Shell rc files to update
 ZSH_RC_FILE="${ZSH_RC_FILE:-$HOME/.zshrc}"
 BASH_RC_FILE="${BASH_RC_FILE:-$HOME/.bashrc}"
 
-# Lines to persist in shell startup
 SSH_AUTH_SOCK_LINE='export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"'
 GPG_TTY_LINE='export GPG_TTY="$(tty)"'
 GPG_UPDATE_TTY_LINE='gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1'
-
-# -----------------------------
-# Helpers
-# -----------------------------
 
 have() {
   command -v "$1" >/dev/null 2>&1
@@ -57,21 +49,13 @@ ask_yes_no() {
   local prompt="$1"
   local answer
 
-  # Read directly from the user's terminal.
-  # This is required because the script is typically executed via:
-  #   curl ... | bash
-  # where stdin is already consumed by the script itself.
   printf '
 %s [y/N]: ' "$prompt" > /dev/tty
   read -r answer < /dev/tty
 
   case "$answer" in
-    y|Y|yes|YES)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -90,11 +74,7 @@ append_if_missing_exact_line() {
 }
 
 choose_ssh_config_file() {
-  if [ -d "$HOME/.ssh" ] || [ -f "$HOME/.ssh/config" ]; then
-    printf '%s\n' "$HOME/.ssh/config"
-  else
-    printf '%s\n' "$HOME/.ssh/config"
-  fi
+  printf '%s\n' "$HOME/.ssh/config"
 }
 
 ensure_ssh_config_block() {
@@ -155,7 +135,6 @@ ensure_gitconfig() {
   printf '  email: %s\n' "$GIT_USER_EMAIL"
 
   if ask_yes_no "Update your global Git identity for GitHub commits?"; then
-
     if [ -f "$gitconfig_file" ]; then
       cp "$gitconfig_file" "$gitconfig_file.bak"
       msg "Backup created: $gitconfig_file.bak"
@@ -291,13 +270,13 @@ append_if_missing_exact_line "$GPG_UPDATE_TTY_LINE" "$BASH_RC_FILE"
 
 TEMP_DIR=""
 USED_MODE=""
+IMPORTED_SECRET_FILE=""
 trap 'cleanup_dir "$TEMP_DIR"' EXIT
 
 if [ -f "$BACKUP_ARCHIVE_PATH" ]; then
   USED_MODE="encrypted local backup import"
 
   msg "Found encrypted backup archive next to script"
-  warn "This mode imports your secret keys onto this machine."
 
   TEMP_DIR="$(mktemp -d)"
   DECRYPTED_TAR="${TEMP_DIR}/gpg-backup.tar.gz"
@@ -308,12 +287,20 @@ if [ -f "$BACKUP_ARCHIVE_PATH" ]; then
   msg "Extracting backup archive"
   tar xzf "$DECRYPTED_TAR" -C "$TEMP_DIR"
 
-  if [ ! -f "${TEMP_DIR}/${SECRET_KEYS_FILE}" ]; then
-    err "Missing ${SECRET_KEYS_FILE} inside backup archive"
+  if [ -f "${TEMP_DIR}/${SECRET_KEYS_FILE}" ]; then
+    IMPORTED_SECRET_FILE="${TEMP_DIR}/${SECRET_KEYS_FILE}"
+    warn "Found full secret-key backup: ${SECRET_KEYS_FILE}"
+    warn "This imports your primary secret key onto this machine."
+  elif [ -f "${TEMP_DIR}/${SECRET_SUBKEYS_FILE}" ]; then
+    IMPORTED_SECRET_FILE="${TEMP_DIR}/${SECRET_SUBKEYS_FILE}"
+    msg "Found subkeys-only backup: ${SECRET_SUBKEYS_FILE}"
+    msg "This imports secret subkeys only; the primary secret key remains absent."
+  else
+    err "Missing both ${SECRET_KEYS_FILE} and ${SECRET_SUBKEYS_FILE} inside backup archive"
   fi
 
-  msg "Importing secret keys"
-  gpg --import "${TEMP_DIR}/${SECRET_KEYS_FILE}"
+  msg "Importing secret key material"
+  gpg --import "$IMPORTED_SECRET_FILE"
 
   if [ -f "${TEMP_DIR}/${OWNERTRUST_FILE}" ]; then
     msg "Importing ownertrust"
@@ -328,11 +315,10 @@ else
   msg "Falling back to YubiKey mode"
 
   if [ -n "$PUBLIC_KEY_URL" ]; then
+    msg "Importing public key from URL"
     if have curl; then
-      msg "Importing public key from URL"
       curl -fsSL "$PUBLIC_KEY_URL" | gpg --import
     else
-      msg "Importing public key from URL"
       wget -qO- "$PUBLIC_KEY_URL" | gpg --import
     fi
   else
@@ -403,6 +389,9 @@ Done.
 Mode used:
   ${USED_MODE}
 
+Secret material imported:
+  ${IMPORTED_SECRET_FILE:-none}
+
 For this shell session, SSH is configured to use:
   SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
 
@@ -420,9 +409,9 @@ Git identity configured as:
 Reload your shell config with one of:
   source "${ZSH_RC_FILE}"
   source "${BASH_RC_FILE}"
-  
+
 Test your GitHub SSH connection with either:
-  ssh -T git@github.com 
+  ssh -T git@github.com
   ssh -T github.com
 
 EOF
