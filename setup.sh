@@ -49,7 +49,7 @@ append_if_missing_exact_line() {
   touch "$file"
 
   if grep -Fqx "$line" "$file" 2>/dev/null; then
-    msg "$Line already present in $file"
+    msg "$line already present in $file"
   else
     msg "Adding $line to $file"
     printf '\n%s\n' "$line" >> "$file"
