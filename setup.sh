@@ -49,9 +49,9 @@ append_if_missing_exact_line() {
   touch "$file"
 
   if grep -Fqx "$line" "$file" 2>/dev/null; then
-    msg "Line already present in $file"
+    msg "$Line already present in $file"
   else
-    msg "Adding line to $file"
+    msg "Adding $line to $file"
     printf '\n%s\n' "$line" >> "$file"
   fi
 }
@@ -123,7 +123,7 @@ ensure_ssh_config_block_for_github() {
         msg "SSH config already contains a block for github.com"
     else
     
-        msg "Appending SSH config block to $HOME/.ssh/config"
+        msg "Appending SSH config block to $HOME/.ssh/config for github"
         
         mkdir -p "$HOME/.ssh"
         chmod 700 "$HOME/.ssh"
@@ -288,12 +288,11 @@ if ask_yes_no "Want to enable ssh with the authentication key? (for GitHub)"; th
     chmod 600 "$GPG_AGENT_CONF"
     
     append_if_missing_exact_line 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' "$ZSH_RC_FILE"
-    append_if_missing_exact_line 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' "$BASH_RC_FILE"
-
     append_if_missing_exact_line 'export GPG_TTY="$(tty)"' "$ZSH_RC_FILE"
-    append_if_missing_exact_line 'export GPG_TTY="$(tty)"' "$BASH_RC_FILE"
-
     append_if_missing_exact_line 'gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1' "$ZSH_RC_FILE"
+
+    append_if_missing_exact_line 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' "$BASH_RC_FILE"
+    append_if_missing_exact_line 'export GPG_TTY="$(tty)"' "$BASH_RC_FILE"
     append_if_missing_exact_line 'gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1' "$BASH_RC_FILE"
 
     ensure_ssh_config_block_for_github
@@ -360,9 +359,12 @@ fi
 # Final instructions
 # -----------------------------
 
-msg "To activate everything exit this session and come back !!"
+echo "!! TO ACTIVATE EVERYTHING EXIT THIS SESSION AND COME BACK !!"
 
 if $ssh_enabled; then
-    msg "To test your GitHub SSH connection :"
-    msg "ssh -T github.com"
+    echo "To test your GitHub SSH connection :"
+    echo "ssh -T github.com"
 fi
+
+# -----------------------------
+# -----------------------------
