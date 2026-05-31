@@ -49,9 +49,9 @@ append_if_missing_exact_line() {
   touch "$file"
 
   if grep -Fqx "$line" "$file" 2>/dev/null; then
-    msg "$line already present in $file"
+    echo "$line ===> already in $file"
   else
-    msg "Adding $line to $file"
+    echo "$line ===> in $file"
     printf '\n%s\n' "$line" >> "$file"
   fi
 }
@@ -120,10 +120,10 @@ ensure_ssh_config_block_for_github() {
     chmod 600 "$HOME/.ssh/config"
 
     if grep -Eq "^[[:space:]]*Host[[:space:]]+github.com([[:space:]]|$)" "$HOME/.ssh/config"; then
-        msg "SSH config already contains a block for github.com"
+        echo "SSH config block for github ===> already in $HOME/.ssh/config"
     else
     
-        msg "Appending SSH config block to $HOME/.ssh/config for github"
+        echo "SSH config block for github ===> in $HOME/.ssh/config"
         
         mkdir -p "$HOME/.ssh"
         chmod 700 "$HOME/.ssh"
@@ -280,6 +280,7 @@ restart_gpg_agent
 
 if ask_yes_no "Want to enable ssh with the authentication key? (for GitHub)"; then
 
+    echo ""
     ssh_enabled=true
 
     GPG_AGENT_CONF="$GNUPGHOME_DIR/gpg-agent.conf"
