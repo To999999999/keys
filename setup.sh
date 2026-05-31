@@ -261,8 +261,7 @@ else
     err "PUBLIC_KEY_URL is empty"
   fi
 
-  msg "Checking YubiKey / smartcard status"
-  if ! gpg --card-status; then
+  if ! gpg --card-status > /dev/null 2>&1; then
     msg "YubiKey/card not detected by GPG."
     msg "If this is a fresh Debian system, you may need:"
     msg "  sudo apt install -y pcscd scdaemon pcsc-tools"
@@ -287,15 +286,15 @@ if ask_yes_no "Want to enable ssh with the authentication key? (for GitHub)"; th
 
     append_if_missing_exact_line "enable-ssh-support" "$GPG_AGENT_CONF"
     chmod 600 "$GPG_AGENT_CONF"
-    
+    echo ""
     append_if_missing_exact_line 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' "$ZSH_RC_FILE"
     append_if_missing_exact_line 'export GPG_TTY="$(tty)"' "$ZSH_RC_FILE"
     append_if_missing_exact_line 'gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1' "$ZSH_RC_FILE"
-
+    echo ""
     append_if_missing_exact_line 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' "$BASH_RC_FILE"
     append_if_missing_exact_line 'export GPG_TTY="$(tty)"' "$BASH_RC_FILE"
     append_if_missing_exact_line 'gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1' "$BASH_RC_FILE"
-
+    echo ""
     ensure_ssh_config_block_for_github
 
     ensure_sshcontrol_contains_auth_keygrip
@@ -360,12 +359,16 @@ fi
 # Final instructions
 # -----------------------------
 
+echo ""
 echo "!! TO ACTIVATE EVERYTHING EXIT THIS SESSION AND COME BACK !!"
+echo ""
 
 if $ssh_enabled; then
     echo "To test your GitHub SSH connection :"
     echo "ssh -T github.com"
 fi
+
+echo ""
 
 # -----------------------------
 # -----------------------------
