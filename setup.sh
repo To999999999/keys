@@ -116,19 +116,27 @@ ensure_sshcontrol_contains_auth_keygrip() {
 ensure_ssh_config_block_for_github() {
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
+
     touch "$HOME/.ssh/config"
     chmod 600 "$HOME/.ssh/config"
 
-    if grep -Eq "^[[:space:]]*Host[[:space:]]+github.com([[:space:]]|$)" "$HOME/.ssh/config"; then
-        echo "SSH config block for github ===> already in $HOME/.ssh/config"
-    else
-    
-        echo "SSH config block for github ===> in $HOME/.ssh/config"
-        
-        mkdir -p "$HOME/.ssh"
-        chmod 700 "$HOME/.ssh"
-        touch "$HOME/.ssh/config"
-        chmod 600 "$HOME/.ssh/config"
+    local tmpfile
+    tmpfile=$(mktemp)
+
+    # Remove any existing github.com host block
+    awk '
+        BEGIN { skip=0 }
+        /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ {
+            skip=1
+            next
+        }
+        /^[[:space:]]*Host[[:space:]]+/ {
+            skip=0
+        }
+        !skip
+    ' "$HOME/.ssh/config" > "$tmpfile"
+
+    mv "$tmpfile" "$HOME/.ssh/config"
 
     cat >> "$HOME/.ssh/config" <<EOF
 
@@ -138,7 +146,7 @@ Host github.com
   IdentityAgent $(gpgconf --list-dirs agent-ssh-socket)
 EOF
 
-    fi
+    echo "SSH config block for github ===> updated in $HOME/.ssh/config"
 }
 
 # -----------------------------
