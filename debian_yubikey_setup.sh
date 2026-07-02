@@ -4,7 +4,7 @@ set -euo pipefail
 USER_NAME="${SUDO_USER:-$USER}"
 
 sudo apt update
-sudo apt install -y gnupg scdaemon pcscd yubikey-manager
+sudo apt install -y gnupg scdaemon pcscd yubikey-manager git
 
 sudo systemctl enable --now pcscd.socket
 
