@@ -94,23 +94,17 @@ get_auth_subkey_keygrip() {
   '
 }
 
-ensure_sshcontrol_contains_auth_keygrip() {
-
+enable_auth_keygrip_for_ssh() {
     AUTH_KEYGRIP="$(get_auth_subkey_keygrip || true)"
     if [ -z "${AUTH_KEYGRIP:-}" ]; then
         err "Could not find an [A] authentication subkey keygrip in your GPG secret keys."
     fi
-    
-    SSHCONTROL_FILE="${GNUPGHOME_DIR}/sshcontrol"
-    touch "$SSHCONTROL_FILE"
-    chmod 600 "$SSHCONTROL_FILE"
 
-    if grep -Fqx "$AUTH_KEYGRIP" "$SSHCONTROL_FILE" 2>/dev/null; then
-        msg "Auth subkey keygrip already present in $SSHCONTROL_FILE"
-    else
-        msg "Adding auth subkey keygrip to $SSHCONTROL_FILE"
-        printf '%s\n' "$AUTH_KEYGRIP" >> "$SSHCONTROL_FILE"
-    fi
+    msg "Enabling auth subkey keygrip for SSH via gpg-agent KEYATTR"
+    gpg-connect-agent "KEYATTR --set ${AUTH_KEYGRIP} Use-for-ssh: true" /bye >/dev/null
+
+    msg "Reloading gpg-agent after KEYATTR update"
+    gpgconf --reload gpg-agent || true
 }
 
 ensure_ssh_config_block_for_github() {
@@ -305,7 +299,7 @@ if ask_yes_no "Want to enable ssh with the authentication key? (for GitHub)"; th
     echo ""
     ensure_ssh_config_block_for_github
 
-    ensure_sshcontrol_contains_auth_keygrip
+    enable_auth_keygrip_for_ssh
 
     restart_gpg_agent
     
@@ -313,9 +307,9 @@ if ask_yes_no "Want to enable ssh with the authentication key? (for GitHub)"; th
     printf '%s\n' "$SSH_ADD_OUTPUT"
 
     if grep -Fq "Error connecting to agent" <<<"$SSH_ADD_OUTPUT"; then
-        err "ssh-add could not talk to the SSH agent after sshcontrol update"
+        err "ssh-add could not talk to the SSH agent after KEYATTR update"
     elif grep -Fq "The agent has no identities." <<<"$SSH_ADD_OUTPUT"; then
-        err "The SSH agent still exposes no identities after updating sshcontrol."
+        err "The SSH agent still exposes no identities after updating KEYATTR."
     fi
     msg "Key currently exposed to SSH"
 
