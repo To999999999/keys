@@ -3,7 +3,9 @@
 Public GPG key:
 - public.asc
 
-Need to either have gpg-backup.tar.gz.gpg (to install the keys) or the Yubikey plugged (to use the subkeys), and they run the bootstrap.
+Requirements:
+- git, curl, gnupg, ssh
+- gpg-backup.tar.gz.gpg (installs the keys) OR Yubikey plugged and readable. (Might need pcsd and more on Linux)  
 
 Bootstrap:
 ```bash
