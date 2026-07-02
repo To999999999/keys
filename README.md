@@ -9,3 +9,7 @@ Bootstrap:
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/To999999999/keys/main/setup.sh && chmod +x setup.sh && ./setup.sh
 ```
+On debian might need to run this first (for dependencies etc):
+```
+curl -fsSLO https://raw.githubusercontent.com/To999999999/keys/main/setup.sh && chmod +x debian_yubikey_setup.sh && ./setup.sh
+```
