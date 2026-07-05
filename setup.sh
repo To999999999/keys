@@ -109,21 +109,21 @@ enable_auth_keygrip_for_ssh() {
 
 ensure_ssh_config_block_for_github() {
     mkdir -p "$HOME/.ssh"
-chmod 700 "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
 
-touch "$HOME/.ssh/config"
-chmod 600 "$HOME/.ssh/config"
+    touch "$HOME/.ssh/config"
+    chmod 600 "$HOME/.ssh/config"
 
-CONFIG="$HOME/.ssh/config"
+    CONFIG="$HOME/.ssh/config"
 
-# If ~/.ssh/config is a symlink, update the target instead of replacing the symlink.
-if [ -L "$CONFIG" ]; then
-    CONFIG="$(readlink "$CONFIG")"
-fi
+    # If ~/.ssh/config is a symlink, update the target instead of replacing the symlink.
+    if [ -L "$CONFIG" ]; then
+        CONFIG="$(readlink "$CONFIG")"
+    fi
 
-tmpfile="$(mktemp)"
+    tmpfile="$(mktemp)"
 
-# Remove any existing github.com host block.
+    # Remove any existing github.com host block.
     awk '
     BEGIN { skip=0 }
     /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ {
