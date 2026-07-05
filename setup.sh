@@ -109,30 +109,37 @@ enable_auth_keygrip_for_ssh() {
 
 ensure_ssh_config_block_for_github() {
     mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
 
-    touch "$HOME/.ssh/config"
-    chmod 600 "$HOME/.ssh/config"
+touch "$HOME/.ssh/config"
+chmod 600 "$HOME/.ssh/config"
 
-    local tmpfile
-    tmpfile=$(mktemp)
+CONFIG="$HOME/.ssh/config"
 
-    # Remove any existing github.com host block
+# If ~/.ssh/config is a symlink, update the target instead of replacing the symlink.
+if [ -L "$CONFIG" ]; then
+    CONFIG="$(readlink "$CONFIG")"
+fi
+
+tmpfile="$(mktemp)"
+
+# Remove any existing github.com host block.
     awk '
-        BEGIN { skip=0 }
-        /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ {
-            skip=1
-            next
-        }
-        /^[[:space:]]*Host[[:space:]]+/ {
-            skip=0
-        }
-        !skip
-    ' "$HOME/.ssh/config" > "$tmpfile"
+    BEGIN { skip=0 }
+    /^[[:space:]]*Host[[:space:]]+github\.com([[:space:]]|$)/ {
+      skip=1
+      next
+    }
+    /^[[:space:]]*Host[[:space:]]+/ {
+      skip=0
+    }
+    !skip
+    ' "$CONFIG" > "$tmpfile"
 
-    mv "$tmpfile" "$HOME/.ssh/config"
+    cat "$tmpfile" > "$CONFIG"
+    rm "$tmpfile"
 
-    cat >> "$HOME/.ssh/config" <<EOF
+    cat >> "$CONFIG" <<EOF
 
 # github.com via GPG agent
 Host github.com
@@ -140,7 +147,9 @@ Host github.com
   IdentityAgent $(gpgconf --list-dirs agent-ssh-socket)
 EOF
 
-    echo "SSH config block for github ===> updated in $HOME/.ssh/config"
+    chmod 600 "$CONFIG"
+
+    echo "SSH config block for github ===> updated in $CONFIG"
 }
 
 # -----------------------------
