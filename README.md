@@ -9,7 +9,7 @@ Requirements:
 
 Bootstrap:
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/To999999999/keys/main/setup.sh && chmod +x setup.sh && ./setup.sh
+curl -fsSLO https://raw.githubusercontent.com/To999999999/keys/main/setup.sh && chmod +x setup.sh && ./setup.sh; status=$?; rm -f setup.sh; exit $status
 ```
 On debian might need to run this first (for dependencies etc):
 ```
